@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PontoPizzaria - Sistema de Controle de Ponto</title>
+    <!-- Lucide Icons CDN -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Supabase JS Client CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <header class="navbar">
+        <div class="logo-container">
+            <i data-lucide="clock" class="logo-icon"></i>
+            <div>
+                <h1 class="brand-title">PontoPizzaria</h1>
+                <span class="brand-subtitle">Sistema de Controle de Ponto & Gestão</span>
+            </div>
+        </div>
+        <nav class="nav-tabs">
+            <button class="nav-btn active" id="tab-totem-btn" onclick="switchTab('totem')">
+                <i data-lucide="tablet"></i>
+                <span>Totem Tablet (Ponto)</span>
+            </button>
+            <button class="nav-btn" id="tab-dashboard-btn" onclick="switchTab('dashboard')">
+                <i data-lucide="layout-dashboard"></i>
+                <span>Painel Gerencial</span>
+            </button>
+        </nav>
+    </header>
+
+    <main class="main-content">
+        <!-- VIEW 1: TOTEM TABLET DE PONTO -->
+        <section id="view-totem" class="view-section active">
+            <div class="totem-grid">
+                <!-- Left Panel: Clock and Camera -->
+                <div class="card camera-card">
+                    <div class="card-header">
+                        <h2><i data-lucide="camera"></i> Validação Facial & Horário</h2>
+                        <span class="badge badge-live" id="ntp-status">
+                            <i data-lucide="check-circle"></i> Horário Servidor (NTP)
+                        </span>
+                    </div>
+
+                    <div class="live-clock-container">
+                        <div class="time-display" id="time-display">00:00:00</div>
+                        <div class="date-display" id="date-display">Carregando data...</div>
+                    </div>
+
+                    <div class="camera-wrapper">
+                        <video id="webcam-feed" autoplay playsinline muted></video>
+                        <canvas id="snapshot-canvas" style="display:none;"></canvas>
+                        <div class="camera-overlay" id="camera-overlay">
+                            <i data-lucide="user-check" class="camera-overlay-icon"></i>
+                            <span id="camera-status-text">Câmera Ativa para Captura Facial</span>
+                        </div>
+                    </div>
+
+                    <div class="location-status" id="location-status">
+                        <i data-lucide="map-pin"></i>
+                        <span id="geo-text">Verificando Geolocalização (Geofencing)...</span>
+                    </div>
+                </div>
+
+                <!-- Right Panel: Employee Input & Clock Action -->
+                <div class="card action-card">
+                    <div class="card-header">
+                        <h2><i data-lucide="user"></i> Identificação do Funcionário</h2>
+                    </div>
+
+                    <form id="ponto-form" onsubmit="handleRegistrarPonto(event)">
+                        <div class="form-group">
+                            <label for="input-matricula">Matrícula ou Selecione o Colaborador:</label>
+                            <div class="input-with-icon">
+                                <i data-lucide="id-card"></i>
+                                <input type="text" id="input-matricula" placeholder="Ex: FUNC001" required autocomplete="off" oninput="onMatriculaChange()">
+                            </div>
+                        </div>
+
+                        <!-- Quick Select Dropdown for testing -->
+                        <div class="form-group">
+                            <label for="select-funcionario-quick">Seleção Rápida (Teste):</label>
+                            <select id="select-funcionario-quick" onchange="selectQuickEmployee(this.value)">
+                                <option value="">-- Selecionar da lista --</option>
+                            </select>
+                        </div>
+
+                        <!-- Info Card of Selected Employee -->
+                        <div class="employee-badge-card" id="employee-badge" style="display:none;">
+                            <div class="emp-avatar">
+                                <i data-lucide="user"></i>
+                            </div>
+                            <div class="emp-info">
+                                <h3 id="emp-nome">Nome do Funcionário</h3>
+                                <p><strong id="emp-cargo">Cargo</strong> - Matrícula: <span id="emp-mat">FUNC000</span></p>
+                                <span class="badge" id="emp-jornada-badge">Jornada 17:00 - 01:00</span>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="select-tipo-registro">Tipo de Batida:</label>
+                            <select id="select-tipo-registro" required>
+                                <option value="ENTRADA">ENTRADA (Início do Turno)</option>
+                                <option value="SAIDA_ALMOCO">SAÍDA REFEIÇÃO / INTERVALO</option>
+                                <option value="RETORNO_ALMOCO">RETORNO REFEIÇÃO / INTERVALO</option>
+                                <option value="SAIDA">SAÍDA (Fim do Turno)</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group checkbox-group" id="group-entrega" style="display:none;">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="check-pedido-rota">
+                                <span><i data-lucide="bike"></i> Possui pedido em rota de entrega no horário de saída (Classificar como HORA_EXTRA_ENTREGA)</span>
+                            </label>
+                        </div>
+
+                        <div id="ponto-alert" class="alert-box" style="display:none;"></div>
+
+                        <button type="submit" class="btn btn-primary btn-block" id="btn-registrar">
+                            <i data-lucide="check-circle-2"></i> Registrar Batida de Ponto
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </section>
+
+        <!-- VIEW 2: PAINEL GERENCIAL -->
+        <section id="view-dashboard" class="view-section">
+            <div class="dashboard-controls">
+                <h2><i data-lucide="shield-alert"></i> Painel de Controle & Monitoramento</h2>
+
+                <!-- Cashier Toggle Control -->
+                <div class="card cashier-control-card">
+                    <div class="cashier-status-info">
+                        <i data-lucide="vault" class="card-icon"></i>
+                        <div>
+                            <h3>Status do Caixa do Dia</h3>
+                            <p id="cashier-status-text">Verificando status do caixa...</p>
+                        </div>
+                    </div>
+                    <div class="cashier-actions">
+                        <button class="btn btn-secondary" id="btn-toggle-caixa" onclick="toggleStatusCaixa()">
+                            <i data-lucide="lock"></i> Fechar/Abrir Caixa
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Alerts Banner -->
+            <div id="kitchen-alerts-banner" class="alerts-banner" style="display:none;">
+                <div class="alert-icon"><i data-lucide="alert-triangle"></i></div>
+                <div class="alert-content">
+                    <h4>Alertas de Atraso na Cozinha (Tolerância > 5 min)</h4>
+                    <ul id="kitchen-alerts-list"></ul>
+                </div>
+            </div>
+
+            <!-- Dashboard Sub-Tabs -->
+            <div class="dash-tabs">
+                <button class="dash-tab-btn active" onclick="switchDashSubTab('espelho')">
+                    <i data-lucide="file-text"></i> Espelho de Ponto
+                </button>
+                <button class="dash-tab-btn" onclick="switchDashSubTab('justificativas')">
+                    <i data-lucide="file-plus"></i> Registrar Justificativa
+                </button>
+                <button class="dash-tab-btn" onclick="switchDashSubTab('comprovante')">
+                    <i data-lucide="search"></i> Consultar Ticket / Comprovante
+                </button>
+            </div>
+
+            <!-- SUB-TAB 1: ESPELHO DE PONTO -->
+            <div id="subtab-espelho" class="dash-subtab-content active">
+                <div class="card">
+                    <div class="card-header flex-between">
+                        <h3><i data-lucide="file-spreadsheet"></i> Consulta de Espelho de Ponto por Colaborador</h3>
+                        <div class="flex-gap">
+                            <select id="select-espelho-funcionario" class="select-inline" onchange="carregarEspelhoPonto()">
+                                <option value="">-- Selecione o Funcionário --</option>
+                            </select>
+                            <button class="btn btn-secondary" onclick="carregarEspelhoPonto()">
+                                <i data-lucide="refresh-cw"></i> Atualizar
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="espelho-summary" class="summary-cards-grid" style="display:none;">
+                        <div class="summary-card">
+                            <span class="summary-label">Total de Batidas</span>
+                            <span class="summary-value" id="summary-total-registros">0</span>
+                        </div>
+                        <div class="summary-card">
+                            <span class="summary-label">Ocorrências / Inconsistências</span>
+                            <span class="summary-value warning" id="summary-total-ocorrencias">0</span>
+                        </div>
+                        <div class="summary-card">
+                            <span class="summary-label">Saídas de Emergência</span>
+                            <span class="summary-value danger" id="summary-total-emergencias">0</span>
+                        </div>
+                    </div>
+
+                    <div class="table-responsive">
+                        <table class="data-table" id="table-espelho">
+                            <thead>
+                                <tr>
+                                    <th>Data Turno (Ref)</th>
+                                    <th>Data/Hora Registro</th>
+                                    <th>Tipo</th>
+                                    <th>Cargo</th>
+                                    <th>Hash Comprovante</th>
+                                    <th>Saída Emergência</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tbody-espelho">
+                                <tr>
+                                    <td colspan="6" class="text-center">Selecione um funcionário para visualizar o espelho de ponto.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <h4 class="margin-top-lg"><i data-lucide="alert-circle"></i> Ocorrências Registradas</h4>
+                    <div class="table-responsive">
+                        <table class="data-table" id="table-ocorrencias">
+                            <thead>
+                                <tr>
+                                    <th>Data Ref</th>
+                                    <th>Tipo Ocorrência</th>
+                                    <th>Minutos Excedentes</th>
+                                    <th>Status</th>
+                                    <th>Justificativa</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tbody-ocorrencias">
+                                <tr>
+                                    <td colspan="5" class="text-center">Nenhuma ocorrência registrada para o filtro.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SUB-TAB 2: REGISTRAR JUSTIFICATIVA -->
+            <div id="subtab-justificativas" class="dash-subtab-content">
+                <div class="card">
+                    <div class="card-header">
+                        <h3><i data-lucide="file-check"></i> Anexar Justificativa / Atestado de Ocorrência</h3>
+                    </div>
+
+                    <form id="form-justificativa" onsubmit="handleJustificarOcorrencia(event)">
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="select-justificativa-funcionario">Funcionário:</label>
+                                <select id="select-justificativa-funcionario" required>
+                                    <option value="">-- Selecione o Colaborador --</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="input-justificativa-data">Data de Referência:</label>
+                                <input type="date" id="input-justificativa-data" required>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="select-justificativa-tipo">Tipo de Ocorrência:</label>
+                                <select id="select-justificativa-tipo" required>
+                                    <option value="ATRASO">ATRASO</option>
+                                    <option value="ATRASO_CRITICO">ATRASO CRÍTICO</option>
+                                    <option value="SAIDA_ANTECIPADA">SAÍDA ANTECIPADA</option>
+                                    <option value="FALTA_JUSTIFICADA">FALTA JUSTIFICADA</option>
+                                    <option value="SAIDA_FORCADA_EMERGENCIA">SAÍDA FORÇADA EMERGÊNCIA</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="input-justificativa-doc">URL do Comprovante / Atestado:</label>
+                                <input type="text" id="input-justificativa-doc" placeholder="https://exemplo.com/comprovante.pdf">
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="textarea-justificativa-texto">Descrição / Justificativa:</label>
+                            <textarea id="textarea-justificativa-texto" rows="3" placeholder="Motivo do atraso, ausência ou liberação..." required></textarea>
+                        </div>
+
+                        <div id="justificativa-alert" class="alert-box" style="display:none;"></div>
+
+                        <button type="submit" class="btn btn-primary">
+                            <i data-lucide="send"></i> Enviar Justificativa
+                        </button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- SUB-TAB 3: CONSULTAR COMPROVANTE POR HASH -->
+            <div id="subtab-comprovante" class="dash-subtab-content">
+                <div class="card">
+                    <div class="card-header">
+                        <h3><i data-lucide="qr-code"></i> Autenticidade de Comprovante de Ponto</h3>
+                    </div>
+
+                    <form id="form-consulta-hash" onsubmit="handleConsultarComprovante(event)">
+                        <div class="form-group">
+                            <label for="input-search-hash">Insira o Hash Único do Comprovante:</label>
+                            <div class="input-with-button">
+                                <input type="text" id="input-search-hash" placeholder="Ex: 8a9f3b2e..." required>
+                                <button type="submit" class="btn btn-primary">
+                                    <i data-lucide="search"></i> Validar Ticket
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+
+                    <div id="comprovante-result" class="receipt-result-box" style="display:none;">
+                        <!-- Rendered by JS -->
+                    </div>
+                </div>
+            </div>
+
+        </section>
+    </main>
+
+    <!-- MODAL: RECIBO DE PONTO GERADO -->
+    <div id="modal-receipt" class="modal-overlay" style="display:none;">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3><i data-lucide="receipt"></i> Comprovante de Registro de Ponto</h3>
+                <button class="modal-close" onclick="closeReceiptModal()"><i data-lucide="x"></i></button>
+            </div>
+            <div class="modal-body" id="receipt-modal-body">
+                <!-- Receipt content filled dynamically -->
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="window.print()">
+                    <i data-lucide="printer"></i> Imprimir Comprovante
+                </button>
+                <button class="btn btn-primary" onclick="closeReceiptModal()">
+                    <i data-lucide="check"></i> Concluir
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: OVERRIDE GERENCIAL / SAIDA FORÇADA CAIXA -->
+    <div id="modal-override" class="modal-overlay" style="display:none;">
+        <div class="modal-card">
+            <div class="modal-header header-warning">
+                <h3><i data-lucide="alert-triangle"></i> Bloqueio: Caixa ABERTO</h3>
+                <button class="modal-close" onclick="closeOverrideModal()"><i data-lucide="x"></i></button>
+            </div>
+            <div class="modal-body">
+                <p>O caixa do dia ainda <strong>NÃO</strong> foi fechado no sistema. A saída para funcionários do Caixa e Atendimento é condicionada ao fechamento do caixa.</p>
+                <p class="text-muted">Selecione uma das opções para prosseguir com o registro:</p>
+
+                <div class="override-options">
+                    <button class="btn btn-warning btn-block" onclick="confirmSaidaEmergencia()">
+                        <i data-lucide="shield-alert"></i> Registrar SAÍDA_FORCADA_EMERGENCIA
+                        <small>Requer justificativa/atestado posterior no painel gerencial.</small>
+                    </button>
+                    <button class="btn btn-secondary btn-block" onclick="switchTab('dashboard'); closeOverrideModal(); toggleStatusCaixa();">
+                        <i data-lucide="key"></i> Ir ao Painel e Fechar Caixa Agora
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Application Script -->
+    <script src="app.js"></script>
+</body>
+</html>
